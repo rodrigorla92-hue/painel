@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+<style>
+body { background:#111; color:white; text-align:center; }
+
+/* CAIXA DO RACK */
+.rack {
+  border:2px solid #555;
+  margin:10px;
+  padding:10px;
+  display:inline-block;
+}
+
+/* COMPRESSORES */
+.comp {
+  padding:10px;
+  margin:5px;
+  border-radius:5px;
+}
+
+.on { background:green; }
+.off { background:red; }
+
+/* LED ONLINE */
+.led {
+  width:15px;
+  height:15px;
+  border-radius:50%;
+  background:red;
+  margin:auto;
+  margin-bottom:5px;
+}
+
+/* LED piscando */
+.online {
+  animation: piscar 1s infinite;
+  background: lime !important;
+}
+
+@keyframes piscar {
+  50% { opacity:0.2; }
+}
+
+/* BOTÕES */
+button {
+  margin:5px;
+  padding:8px;
+}
+</style>
+
+</head>
+
+<body>
+
+<h1>Painel Geral</h1>
+
+<div id="painel"></div>
+
+<script>
+
+// ================= CONFIGURAÇÃO =================
+const TOTAL_RACKS = 7;
+const TOTAL_COMPRESSORES = 4;
+const TOTAL_RESETS = 4;
+
+// ===== NOMES PERSONALIZADOS DOS RACKS =====
+const NOMES_RACKS = [
+  "cremes",
+  "tunel 02",
+  "tunel 03",
+  "camara fria sucos",
+  "tunel 04 ",
+  "chiler.",
+  "tunel 05 ",
+];
+
+// ================= MQTT =================
+const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+
+// ================= ELEMENTO PRINCIPAL =================
+const painel = document.getElementById("painel");
+
+// ================= CONTROLE DE TEMPO =================
+let tempoRack = {};
+
+// ================= CRIA INTERFACE =================
+for(let r=1; r<=TOTAL_RACKS; r++){
+
+  let rack = document.createElement("div");
+  rack.className = "rack";
+
+  // ===== DEFINE NOME =====
+  let nome = NOMES_RACKS[r-1] || `Rack ${r}`;
+
+  rack.innerHTML = `
+    <h2>${nome}</h2>
+    <div id="led${r}" class="led"></div>
+  `;
+
+  // ===== COMPRESSORES =====
+  for(let c=1; c<=TOTAL_COMPRESSORES; c++){
+    rack.innerHTML += `
+      <div id="r${r}c${c}" class="comp off">
+        C${c}
+      </div>
+    `;
+  }
+
+  // ===== BOTÕES RESET =====
+  for(let b=1; b<=TOTAL_RESETS; b++){
+    rack.innerHTML += `
+      <button onclick="reset('rack${r}/reset${b}')">
+        Reset ${b}
+      </button>
+    `;
+  }
+
+  painel.appendChild(rack);
+
+  tempoRack[r] = Date.now();
+}
+
+// ================= CONEXÃO MQTT =================
+client.on('connect', ()=>{
+
+  console.log("Conectado ao MQTT");
+
+  for(let r=1; r<=TOTAL_RACKS; r++){
+
+    // COMPRESSORES
+    for(let c=1; c<=TOTAL_COMPRESSORES; c++){
+      client.subscribe(`rack${r}/c${c}`);
+    }
+
+    // STATUS
+    client.subscribe(`rack${r}/status`);
+  }
+});
+
+// ================= RECEBE MQTT =================
+client.on('message',(topic,msg)=>{
+
+  msg = msg.toString();
+
+  for(let r=1; r<=TOTAL_RACKS; r++){
+
+    // ===== STATUS =====
+    if(topic === `rack${r}/status`){
+      tempoRack[r] = Date.now();
+      document.getElementById("led"+r).classList.add("online");
+    }
+
+    // ===== COMPRESSORES =====
+    for(let c=1; c<=TOTAL_COMPRESSORES; c++){
+      if(topic === `rack${r}/c${c}`){
+        atualizar(`r${r}c${c}`, msg);
+      }
+    }
+  }
+});
+
+// ================= VERIFICA QUEDA =================
+setInterval(()=>{
+
+  let agora = Date.now();
+
+  for(let r=1; r<=TOTAL_RACKS; r++){
+    if(agora - tempoRack[r] > 3000){
+      document.getElementById("led"+r).classList.remove("online");
+    }
+  }
+
+},1000);
+
+// ================= RESET =================
+function reset(topico){
+  client.publish(topico,"ON");
+  setTimeout(()=>client.publish(topico,"OFF"),3000);
+}
+
+// ================= ATUALIZA VISUAL =================
+function atualizar(id, estado){
+
+  let el = document.getElementById(id);
+
+  el.classList.remove("on","off");
+
+  el.classList.add(
+    estado === "ON" ? "on" : "off"
+  );
+}
+
+</script>
+
+</body>
+</html>
